@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MeshTalk — Offline Emergency Network</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
+  body { background: #0f172a; color: #f1f5f9; min-height: 100vh; display: flex; flex-direction: column; }
+  header { background: #1e293b; padding: 16px; text-align: center; border-bottom: 2px solid #334155; }
+  header h1 { font-size: 1.4rem; color: #38bdf8; }
+  header p { font-size: 0.8rem; color: #94a3b8; margin-top: 4px; }
+  .tabs { display: flex; background: #1e293b; }
+  .tab-btn { flex: 1; padding: 14px; background: none; border: none; color: #94a3b8; font-size: 1rem; cursor: pointer; }
+  .tab-btn.active { color: #38bdf8; border-bottom: 3px solid #38bdf8; }
+  .screen { display: none; flex: 1; flex-direction: column; padding: 12px; overflow-y: auto; }
+  .screen.active { display: flex; }
+  #messages { flex: 1; overflow-y: auto; margin-bottom: 10px; }
+  .msg { background: #1e293b; padding: 10px 14px; border-radius: 12px; margin-bottom: 8px; max-width: 80%; }
+  .msg .name { font-size: 0.75rem; color: #38bdf8; font-weight: bold; }
+  .msg .time { font-size: 0.65rem; color: #64748b; float: right; }
+  .input-row { display: flex; gap: 8px; }
+  input, select, textarea { padding: 12px; border-radius: 10px; border: none; font-size: 1rem; background: #334155; color: #f1f5f9; width: 100%; }
+  button.send { background: #38bdf8; color: #0f172a; border: none; padding: 12px 18px; border-radius: 10px; font-weight: bold; cursor: pointer; }
+  .checkin-form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+  .checkin-card { background: #1e293b; padding: 12px; border-radius: 10px; margin-bottom: 8px; border-left: 5px solid #38bdf8; }
+  .checkin-card.safe { border-left-color: #4ade80; }
+  .checkin-card.help { border-left-color: #f87171; }
+  .checkin-card .status { font-weight: bold; }
+  .checkin-card.safe .status { color: #4ade80; }
+  .checkin-card.help .status { color: #f87171; }
+</style>
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📡 MeshTalk</h1>
+  <p>Local network communication — works without internet</p>
+  <p id="userCount" style="margin-top:6px; color:#4ade80; font-weight:bold;"></p>
+  <div id="qrcode" style="margin-top:10px; display:flex; justify-content:center;"></div>
+</header>
+
+<div class="tabs">
+  <button class="tab-btn active" onclick="switchTab('chat')">💬 Chat</button>
+  <button class="tab-btn" onclick="switchTab('checkin')">🛟 Safety</button>
+  <button class="tab-btn" onclick="switchTab('resources')">📦 Resources</button>
+</div>
+
+<div id="chat" class="screen active">
+  <div id="messages"></div>
+  <div class="input-row">
+    <input id="msgInput" placeholder="Type a message..." />
+    <button class="send" onclick="sendMessage()">➤</button>
+  </div>
+</div>
+
+<div id="checkin" class="screen">
+  <div class="checkin-form">
+    <select id="statusSelect">
+      <option value="safe">✅ I'm Safe</option>
+      <option value="help">🆘 I Need Help</option>
+    </select>
+    <textarea id="noteInput" placeholder="Optional note (e.g. location, what you need)"></textarea>
+    <button class="send" onclick="sendCheckin()">Post Update</button>
+  </div>
+  <div id="checkinList"></div>
+</div>
+
+<div id="resources" class="screen">
+  <div class="checkin-form">
+    <select id="resourceType">
+      <option value="have">📦 I Have This</option>
+      <option value="need">🙏 I Need This</option>
+    </select>
+    <input id="resourceItem" placeholder="Item (e.g. water, blanket, medicine)" />
+    <textarea id="resourceNote" placeholder="Optional note (quantity, where to find you, etc.)"></textarea>
+    <button class="send" onclick="sendResource()">Post</button>
+  </div>
+  <div id="resourceList"></div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const socket = io();
+  let name = localStorage.getItem('meshtalk-name');
+  while (!name) { name = prompt("Enter your name:"); }
+  localStorage.setItem('meshtalk-name', name);
+
+  function switchTab(tab) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById(tab).classList.add('active');
+    event.target.classList.add('active');
+  }
+
+  function sendMessage() {
+    const input = document.getElementById('msgInput');
+    const message = input.value.trim();
+    if (!message) return;
+    const data = { name, message, time: new Date().toLocaleTimeString() };
+    socket.emit('chat-message', data);
+    input.value = '';
+  }
+
+  document.getElementById('msgInput').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') sendMessage();
+  });
+
+  socket.on('chat-message', (data) => {
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'msg';
+    msgDiv.innerHTML = `<span class="name">${data.name}</span> <span class="time">${data.time}</span><br>${data.message}`;
+    document.getElementById('messages').appendChild(msgDiv);
+    document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+  });
+
+  function sendCheckin() {
+    const status = document.getElementById('statusSelect').value;
+    const note = document.getElementById('noteInput').value.trim();
+    const data = { name, status, note, time: new Date().toLocaleTimeString() };
+    socket.emit('checkin', data);
+    document.getElementById('noteInput').value = '';
+  }
+
+  function renderCheckin(data) {
+    const card = document.createElement('div');
+    card.className = `checkin-card ${data.status}`;
+    card.innerHTML = `
+      <div class="status">${data.status === 'safe' ? '✅ SAFE' : '🆘 NEEDS HELP'} — ${data.name}</div>
+      <div>${data.note || ''}</div>
+      <small>${data.time}</small>
+    `;
+    document.getElementById('checkinList').prepend(card);
+  }
+
+  socket.on('checkin', renderCheckin);
+  socket.on('checkin-history', (history) => history.forEach(renderCheckin));
+
+  // ---- RESOURCES ----
+  function sendResource() {
+    const type = document.getElementById('resourceType').value;
+    const item = document.getElementById('resourceItem').value.trim();
+    const note = document.getElementById('resourceNote').value.trim();
+    if (!item) return;
+    const data = { name, type, item, note, time: new Date().toLocaleTimeString() };
+    socket.emit('resource', data);
+    document.getElementById('resourceItem').value = '';
+    document.getElementById('resourceNote').value = '';
+  }
+
+  function renderResource(data) {
+    const card = document.createElement('div');
+    card.className = `checkin-card ${data.type}`;
+    card.innerHTML = `
+      <div class="status">${data.type === 'have' ? '📦 HAS' : '🙏 NEEDS'}: ${data.item} — ${data.name}</div>
+      <div>${data.note || ''}</div>
+      <small>${data.time}</small>
+    `;
+    document.getElementById('resourceList').prepend(card);
+  }
+
+  socket.on('resource', renderResource);
+  socket.on('resource-history', (history) => history.forEach(renderResource));
+
+socket.on('user-count', (count) => {
+  document.getElementById('userCount').innerText = `🟢 ${count} connected`;
+});
+
+new QRCode(document.getElementById("qrcode"), {
+  text: window.location.href,
+  width: 100,
+  height: 100
+});
+
+</script>
+
+</body>
+</html>
